@@ -2,19 +2,24 @@
 
 import { useContext, useEffect, useRef, useState } from "react";
 import { SocketContext } from "@/context/SocketContext";
+import { useRouter } from "next/navigation";
 
 import Chat from "@/components/Chat";
 import Footer from "@/components/Footer";
 import Header from "@/components/Header";
+import { Stream } from "stream";
 
 export default function Room({ params }: { params: { id: string } }) {
   const { socket } = useContext(SocketContext);
 
-  const [remoteStreams, setRemoteStreams] = useState<MediaStream[]>([]);
+  const [remoteStreams, setRemoteStreams] = useState<
+    { id: string; stream: MediaStream }[]
+  >([]);
   const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
 
   const localStream = useRef<HTMLVideoElement>(null);
   const peerConnections = useRef<Record<string, RTCPeerConnection>>({});
+  const router = useRouter();
 
   useEffect(() => {
     socket?.on("connect", () => {
@@ -117,7 +122,19 @@ export default function Room({ params }: { params: { id: string } }) {
 
     peerConnection.ontrack = (event) => {
       const remoteStream = event.streams[0];
-      setRemoteStreams([...remoteStreams, remoteStream]);
+
+      const dataStream = {
+        id: socketId,
+        stream: remoteStream,
+      };
+
+      setRemoteStreams((prevState) => {
+        if (!prevState.some((stream) => stream.id === socketId)) {
+          return [...prevState, dataStream];
+        }
+
+        return prevState;
+      });
     };
 
     peer.onicecandidate = (event) => {
@@ -127,6 +144,38 @@ export default function Room({ params }: { params: { id: string } }) {
           sender: socket.id,
           candidate: event.candidate,
         });
+      }
+    };
+
+    peerConnection.onsignalingstatechange = (event) => {
+      switch (peerConnection.signalingState) {
+        case "closed":
+          setRemoteStreams((prevState) =>
+            prevState.filter((stream) => stream.id !== socketId)
+          );
+
+          break;
+      }
+    };
+
+    peerConnection.onconnectionstatechange = (event) => {
+      switch (peerConnection.connectionState) {
+        case "closed":
+          setRemoteStreams((prevState) =>
+            prevState.filter((stream) => stream.id !== socketId)
+          );
+
+        case "failed":
+          setRemoteStreams((prevState) =>
+            prevState.filter((stream) => stream.id !== socketId)
+          );
+
+        case "disconnected":
+          setRemoteStreams((prevState) =>
+            prevState.filter((stream) => stream.id !== socketId)
+          );
+
+          break;
       }
     };
   };
@@ -180,6 +229,20 @@ export default function Room({ params }: { params: { id: string } }) {
     }
   };
 
+  const logout = () => {
+    mediaStream?.getTracks().forEach((track) => {
+      track.stop();
+    });
+
+    Object.values(peerConnections.current).forEach((peerConnection) => {
+      peerConnection.close();
+    });
+
+    socket?.disconnect();
+
+    router.push("/");
+  };
+
   return (
     <div className="h-screen">
       <Header />
@@ -205,8 +268,8 @@ export default function Room({ params }: { params: { id: string } }) {
                 <video
                   className="h-full w-full mirror-mode"
                   ref={(video) => {
-                    if (video && video.srcObject !== stream)
-                      video.srcObject = stream;
+                    if (video && video.srcObject !== stream.stream)
+                      video.srcObject = stream.stream;
                   }}
                   autoPlay
                   playsInline
@@ -220,7 +283,12 @@ export default function Room({ params }: { params: { id: string } }) {
         <Chat roomId={params.id} />
       </div>
 
-      <Footer />
+      <Footer
+        mediaStream={mediaStream}
+        peerConnections={peerConnections}
+        localStream={localStream}
+        logout={logout}
+      />
     </div>
   );
 }

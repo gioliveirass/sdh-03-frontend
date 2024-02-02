@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { MutableRefObject, RefObject, useState } from "react";
 
 import {
   IconDesktop,
@@ -14,7 +14,17 @@ import {
 
 import Container from "./Container";
 
-export default function Footer() {
+export default function Footer({
+  mediaStream,
+  peerConnections,
+  localStream,
+  logout,
+}: {
+  mediaStream: MediaStream | null;
+  peerConnections: MutableRefObject<Record<string, RTCPeerConnection>>;
+  localStream: RefObject<HTMLVideoElement>;
+  logout: () => void;
+}) {
   const [isMuted, setIsMuted] = useState(false);
   const [isCameraOff, setIsCameraOff] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
@@ -22,6 +32,74 @@ export default function Footer() {
   const date = new Date();
   const hours = date.getHours().toString().padStart(2, "0") + ":";
   const minutes = date.getMinutes().toString().padStart(2, "0");
+
+  const toggleMuted = () => {
+    mediaStream?.getAudioTracks().forEach((track) => {
+      track.enabled = !isMuted;
+    });
+
+    Object.values(peerConnections.current).forEach((peerConnection) => {
+      peerConnection.getSenders().forEach((sender: any) => {
+        if (sender.track.kind === "audio") {
+          sender.track.enabled = !isMuted;
+        }
+      });
+    });
+
+    setIsMuted(!isMuted);
+  };
+
+  const toggleCamera = () => {
+    mediaStream?.getVideoTracks().forEach((track) => {
+      track.enabled = isCameraOff;
+    });
+
+    Object.values(peerConnections.current).forEach((peerConnection) => {
+      peerConnection.getSenders().forEach((sender: any) => {
+        if (sender.track.kind === "video") {
+          sender.track.enabled = isCameraOff;
+        }
+      });
+    });
+
+    setIsCameraOff(!isCameraOff);
+  };
+
+  const toggleScreenSharing = async () => {
+    if (!isScreenSharing) {
+      const videoShareScreen = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+      });
+
+      if (localStream && localStream.current)
+        localStream.current.srcObject = videoShareScreen;
+
+      Object.values(peerConnections.current).forEach((peerConnection) => {
+        peerConnection.getSenders().forEach((sender: any) => {
+          if (sender.track.kind === "video") {
+            sender.replaceTrack(videoShareScreen.getVideoTracks()[0]);
+          }
+        });
+      });
+
+      setIsScreenSharing(!isScreenSharing);
+
+      return;
+    }
+
+    if (localStream && localStream.current)
+      localStream.current.srcObject = mediaStream;
+
+    Object.values(peerConnections.current).forEach((peerConnection) => {
+      peerConnection.getSenders().forEach((sender: any) => {
+        if (sender.track.kind === "video") {
+          sender.replaceTrack(mediaStream?.getVideoTracks()[0]);
+        }
+      });
+    });
+
+    setIsScreenSharing(!isScreenSharing);
+  };
 
   return (
     <section
@@ -38,40 +116,43 @@ export default function Footer() {
             {isMuted ? (
               <IconMicrophoneDisabled
                 className="h-12 w-16 text-white p-2 rounded-md cursor-pointer bg-red-500"
-                onClick={() => setIsMuted(!isMuted)}
+                onClick={() => toggleMuted()}
               />
             ) : (
               <IconMicrophone
                 className="h-12 w-16 text-white p-2 bg-gray-950 rounded-md cursor-pointer"
-                onClick={() => setIsMuted(!isMuted)}
+                onClick={() => toggleMuted()}
               />
             )}
 
             {isCameraOff ? (
               <IconVideoDisabled
                 className="h-12 w-16 text-white p-2 rounded-md cursor-pointer bg-red-500"
-                onClick={() => setIsCameraOff(!isCameraOff)}
+                onClick={() => toggleCamera()}
               />
             ) : (
               <IconVideo
                 className="h-12 w-16 text-white p-2 bg-gray-950 rounded-md cursor-pointer"
-                onClick={() => setIsCameraOff(!isCameraOff)}
+                onClick={() => toggleCamera()}
               />
             )}
 
             {isScreenSharing ? (
               <IconDesktopDisabled
                 className="h-12 w-16 text-white p-2 rounded-md cursor-pointer bg-red-500"
-                onClick={() => setIsScreenSharing(!isScreenSharing)}
+                onClick={() => toggleScreenSharing()}
               />
             ) : (
               <IconDesktop
                 className="h-12 w-16 text-white p-2 bg-gray-950 rounded-md cursor-pointer"
-                onClick={() => setIsScreenSharing(!isScreenSharing)}
+                onClick={() => toggleScreenSharing()}
               />
             )}
 
-            <IconTelephone className="h-12 w-16 text-white p-2 bg-primary rounded-md cursor-pointer hover:bg-red-500" />
+            <IconTelephone
+              onClick={() => logout()}
+              className="h-12 w-16 text-white p-2 bg-primary rounded-md cursor-pointer hover:bg-red-500"
+            />
           </div>
         </div>
       </Container>
